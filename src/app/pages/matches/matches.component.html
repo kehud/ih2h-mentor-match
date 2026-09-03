@@ -1,0 +1,138 @@
+<main class="matches-page">
+  <div class="matches-content" [class.is-loading]="isMatchesLoading || isLoggingOut">
+  <header class="topbar">
+    <a class="brand" routerLink="/matches" aria-label="MentorMatch home">
+      <img class="brand-mark" src="assets/ih2h-logo.png" alt="">
+      <span>
+        <strong class="desktop-brand-name">MentorMatch</strong>
+        <strong class="mobile-brand-name">Mentor Program</strong>
+        <small class="desktop-brand-subtitle">Built for those who serve</small>
+        <small class="mobile-brand-subtitle">Israel Heart 2 Heart</small>
+      </span>
+    </a>
+    <button class="logout-button" type="button" [disabled]="isLoggingOut" (click)="logout()">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 7l5 5-5 5M19 12H8M11 4H5a2 2 0 00-2 2v12a2 2 0 002 2h6"/></svg>
+      Logout
+    </button>
+  </header>
+
+  @if (matchesState$ | async; as matchesState) {
+    @if (matchesState.hasError) {
+      <section class="empty-state matches-error-state">
+        <h1>We couldn’t load your mentor matches.</h1>
+        <p>Please try again.</p>
+        <button class="matches-retry" type="button" (click)="retryMatches()">Try again</button>
+      </section>
+    } @else {
+      @if (matchesState.matches; as matches) {
+        @if (getActiveMatch(matches); as match) {
+      <section class="matches-intro" aria-labelledby="matches-title">
+        <h1 id="matches-title">Your mentor matches</h1>
+        <div class="title-decoration" aria-hidden="true"><span></span><b>♥</b><span></span></div>
+        <p>We found {{ matches.length }} thoughtful mentor recommendations for you.<br>Take your time and choose what feels right.</p>
+      </section>
+
+      <section class="match-shell" aria-label="Mentor match {{ getActiveMatchIndex(matches) + 1 }} of {{ matches.length }}">
+        <article
+          class="match-card"
+          [class.swipe-out-left]="swipeTransition === 'outgoing-left'"
+          [class.swipe-out-right]="swipeTransition === 'outgoing-right'"
+          [class.swipe-in-left]="swipeTransition === 'incoming-left'"
+          [class.swipe-in-right]="swipeTransition === 'incoming-right'"
+          (touchstart)="onMatchTouchStart($event)"
+          (touchend)="onMatchTouchEnd($event, matches)">
+          <div class="mobile-status-chips">
+            <span class="mobile-status-chip">{{ getPickLabel(match.rank) }}</span>
+            <span class="mobile-status-chip mobile-score-chip"><strong>{{ match.matchScore }}%</strong> match</span>
+          </div>
+
+          <div class="card-topline">
+            <span class="match-count">{{ getActiveMatchIndex(matches) + 1 }} of {{ matches.length }}</span>
+            <span class="score"><strong>{{ match.matchScore }}%</strong> match <b>★</b></span>
+          </div>
+
+          <div class="mentor-overview">
+            <div class="mentor-details">
+              <h2>{{ getMentorFirstName(match.mentorName) }}</h2>
+              <p class="professional-background">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="1"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M3 12h18M10 12v2h4v-2"/></svg>
+                <span class="background-text">{{ match.mentorProfessionalBackground }}</span>
+              </p>
+              <p class="mentor-bio" [class.mobile-collapsed]="!isProfileExpanded(match)">{{ match.mentorBio }}</p>
+            </div>
+          </div>
+
+          <div class="match-details">
+            <section class="reasons-section">
+              <h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM17 11l2 2 4-4M17 17l2 2 4-4"/></svg>Why this may be a good fit</h3>
+              <ul>
+                @for (reason of match.reasons; track reason; let index = $index) {
+                  <li [class.mobile-extra]="index >= 3" [class.mobile-extra-visible]="isProfileExpanded(match)"><span aria-hidden="true">✓</span>{{ reason }}</li>
+                }
+              </ul>
+            </section>
+            <section class="areas-section">
+              <h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a8.5 8.5 0 01-2.3-4.6A5.5 5.5 0 013 11.1C3 8.3 5.2 6 8 6c1.7 0 3.2.8 4 2.1A4.9 4.9 0 0121 11a4.8 4.8 0 01-3.1 4.5A8.6 8.6 0 0112 21zM8 10l2 2 3-4M14 14l2 2 3-3"/></svg>Areas of connection</h3>
+              <div class="area-pills">
+                @for (area of getConnectionAreas(match); track $index; let index = $index) {
+                  <span [class.mobile-extra]="index >= 3" [class.mobile-extra-visible]="isProfileExpanded(match)">{{ area }}</span>
+                }
+              </div>
+            </section>
+          </div>
+
+          <button class="profile-toggle" type="button" (click)="toggleProfile(match)" [attr.aria-expanded]="isProfileExpanded(match)">
+            {{ isProfileExpanded(match) ? 'Show less' : 'View full profile' }}
+          </button>
+
+          <div class="actions">
+            <button class="pass" type="button" [class.is-selected]="getDecision(match) === 'passed'" [disabled]="updatingMatchId === match.id" (click)="handleDecisionClick($event, match, 'passed')"><span aria-hidden="true">×</span>{{ getDecision(match) === 'passed' ? 'Passed ✓' : 'Not the right fit' }}</button>
+            <button class="interested" type="button" [class.is-selected]="getDecision(match) === 'liked'" [disabled]="updatingMatchId === match.id" (click)="handleDecisionClick($event, match, 'liked')"><span aria-hidden="true">♡</span>{{ getDecision(match) === 'liked' ? 'Interested ✓' : 'Interested' }}</button>
+            <button class="select" type="button" [class.is-selected]="getDecision(match) === 'selected'" [disabled]="updatingMatchId === match.id || (hasSelectedMatch(matches) && getDecision(match) !== 'selected')" (click)="handleDecisionClick($event, match, 'selected')"><span aria-hidden="true">♧</span>{{ getDecision(match) === 'selected' ? 'Selected ✓' : "I'd like to connect" }}</button>
+          </div>
+          <p class="choice-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-3 8.4-7 10-4-1.6-7-5.6-7-10V6l7-3zM9 12l2 2 4-5"/></svg>You can review all matches before making your final choice.</p>
+        </article>
+
+        <div class="pagination" aria-label="Match navigation">
+          <button class="nav-arrow" type="button" (click)="showPreviousMatch(matches)" aria-label="Previous mentor match"><span aria-hidden="true">←</span></button>
+          <div class="progress-dots">
+            @for (item of matches; track item.id; let index = $index) {
+              <button type="button" [class.active]="index === getActiveMatchIndex(matches)" (click)="showMatch(index)" [attr.aria-label]="'Show mentor match ' + (index + 1)"></button>
+            }
+          </div>
+          <button class="nav-arrow" type="button" (click)="showNextMatch(matches)" aria-label="Next mentor match"><span aria-hidden="true">→</span></button>
+        </div>
+      </section>
+
+      <div class="mobile-floating-progress" aria-label="Mentor match navigation">
+        @for (dot of swipeProgressDots; track dot) {
+          <button
+            type="button"
+            [class.active]="dot === getActiveMatchIndex(matches)"
+            [disabled]="dot >= matches.length"
+            (click)="showMatch(dot)"
+            [attr.aria-label]="'Show mentor match ' + (dot + 1)"></button>
+        }
+      </div>
+        } @else {
+          <section class="empty-state"><h1>Your mentor matches aren’t ready yet.</h1></section>
+        }
+      }
+    }
+  }
+  </div>
+
+  <div class="auth-transition-overlay" [class.is-hidden]="!isMatchesLoading" role="status" [attr.aria-hidden]="!isMatchesLoading">
+    <div>
+      <img class="auth-transition-logo" src="assets/ih2h-logo.png" alt="">
+      <strong>Preparing your mentor matches…</strong>
+    </div>
+  </div>
+
+  <div class="auth-transition-overlay" [class.is-hidden]="!isLoggingOut" role="status" [attr.aria-hidden]="!isLoggingOut">
+    <div>
+      <img class="auth-transition-logo" src="assets/ih2h-logo.png" alt="">
+      <strong>Signing you out…</strong>
+    </div>
+  </div>
+</main>

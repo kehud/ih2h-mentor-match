@@ -1,3 +1,8 @@
+import type { AppLanguage } from '../services/language.service';
+
+export type LocalizedField<T> = Record<AppLanguage, T>;
+export type LegacyLocalizedField<T> = LocalizedField<T> | T;
+
 export interface Match {
   id?: string;
 
@@ -7,12 +12,12 @@ export interface Match {
   matchScore: number;
 
   mentorName: string;
-  mentorBio: string;
-  mentorProfessionalBackground: string;
+  mentorBio: LegacyLocalizedField<string>;
+  mentorProfessionalBackground: LegacyLocalizedField<string>;
 
-  mentorInterests: string[];
-  reasons: string[];
-  matchedAreas: string[];
+  mentorInterests: LegacyLocalizedField<string[]>;
+  reasons: LegacyLocalizedField<string[]>;
+  matchedAreas: LegacyLocalizedField<string[]>;
 
   decision: 'pending' | 'liked' | 'passed' | 'selected';
 

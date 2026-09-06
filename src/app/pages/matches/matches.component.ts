@@ -13,9 +13,11 @@ import {
 } from 'rxjs';
 
 import { Match } from '../../models/match.model';
+import type { LegacyLocalizedField } from '../../models/match.model';
 import { MatchesService } from '../../services/matches.service';
 import { MenteeService } from '../../services/mentee.service';
 import { AuthService } from '../../services/auth.service';
+import { LanguageService } from '../../services/language.service';
 
 @Component({
   selector: 'app-matches',
@@ -28,6 +30,7 @@ export class MatchesComponent {
   private readonly matchesService = inject(MatchesService);
   private readonly menteeService = inject(MenteeService);
   private readonly authService = inject(AuthService);
+  readonly languageService = inject(LanguageService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly refreshMatches$ = new BehaviorSubject<void>(undefined);
@@ -135,11 +138,28 @@ export class MatchesComponent {
   }
 
   getPickLabel(rank: number): string {
-    return rank === 1 ? 'Top pick' : `#${rank} pick`;
+    return rank === 1
+      ? this.languageService.t('topPick')
+      : this.languageService.t('pick', { rank });
   }
 
   getConnectionAreas(match: Match): string[] {
-    return [...match.matchedAreas, ...match.mentorInterests];
+    return [
+      ...this.getLocalizedArray(match.matchedAreas),
+      ...this.getLocalizedArray(match.mentorInterests)
+    ];
+  }
+
+  getLocalizedText(value: LegacyLocalizedField<string>): string {
+    return typeof value === 'string'
+      ? value
+      : value[this.languageService.language()] ?? value.en ?? value.he ?? '';
+  }
+
+  getLocalizedArray(value: LegacyLocalizedField<string[]>): string[] {
+    return Array.isArray(value)
+      ? value
+      : value[this.languageService.language()] ?? value.en ?? value.he ?? [];
   }
 
   getDecision(match: Match): Match['decision'] {

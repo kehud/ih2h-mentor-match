@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { AuthService } from '../../services/auth.service';
+import { LanguageService } from '../../services/language.service';
 
 @Component({
   selector: 'app-login',
@@ -14,6 +15,7 @@ import { AuthService } from '../../services/auth.service';
 export class LoginComponent {
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
+  readonly languageService = inject(LanguageService);
 
   email = '';
   password = '';
@@ -24,7 +26,7 @@ export class LoginComponent {
 
   async login(): Promise<void> {
     if (!this.email || !this.password) {
-      this.errorMessage = 'Email and password are required.';
+      this.errorMessage = this.languageService.t('emailAndPasswordRequired');
       return;
     }
 
@@ -45,19 +47,19 @@ export class LoginComponent {
 
       switch (error?.code) {
         case 'auth/invalid-credential':
-          this.errorMessage = 'Invalid email or password.';
+          this.errorMessage = this.languageService.t('invalidEmailOrPassword');
           break;
 
         case 'auth/invalid-email':
-          this.errorMessage = 'Invalid email address.';
+          this.errorMessage = this.languageService.t('invalidEmailAddress');
           break;
 
         case 'auth/too-many-requests':
-          this.errorMessage = 'Too many attempts. Try again later.';
+          this.errorMessage = this.languageService.t('tooManyAttempts');
           break;
 
         default:
-          this.errorMessage = 'Login failed.';
+          this.errorMessage = this.languageService.t('loginFailed');
       }
     } finally {
       this.loading = false;

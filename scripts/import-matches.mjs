@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const XLSX = require('xlsx');
 import { cert, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 
 const SERVICE_ACCOUNT_PATH = path.resolve(
@@ -42,6 +43,7 @@ initializeApp({
 });
 
 const db = getFirestore();
+const auth = getAuth();
 
 const workbook = XLSX.readFile(inputFile, {
   cellDates: true
@@ -58,11 +60,16 @@ const requiredColumns = [
   'rank',
   'matchScore',
   'mentorName',
-  'mentorBio',
-  'mentorProfessionalBackground',
-  'mentorInterests',
-  'reasons',
-  'matchedAreas',
+  'mentorBioEn',
+  'mentorBioHe',
+  'mentorProfessionalBackgroundEn',
+  'mentorProfessionalBackgroundHe',
+  'mentorInterestsEn',
+  'mentorInterestsHe',
+  'reasonsEn',
+  'reasonsHe',
+  'matchedAreasEn',
+  'matchedAreasHe',
   'decision',
   'generatedAt'
 ];
@@ -79,13 +86,21 @@ for (const column of requiredColumns) {
   }
 }
 
-function parseJsonArray(value, fieldName) {
+function parseRequiredJsonArray(value, fieldName) {
   if (Array.isArray(value)) {
-    return value;
+    return value.map((item, index) => {
+      if (typeof item !== 'string' || !item.trim()) {
+        throw new Error(
+          `Invalid item at index ${index} in field "${fieldName}". Expected a non-empty string.`
+        );
+      }
+
+      return item.trim();
+    });
   }
 
-  if (!value) {
-    return [];
+  if (value === null || value === undefined || !String(value).trim()) {
+    throw new Error(`Missing required JSON array in field "${fieldName}".`);
   }
 
   try {
@@ -95,12 +110,68 @@ function parseJsonArray(value, fieldName) {
       throw new Error('Value is not an array');
     }
 
-    return parsed;
+    return parseRequiredJsonArray(parsed, fieldName);
   } catch {
     throw new Error(
       `Invalid JSON array in field "${fieldName}": ${value}`
     );
   }
+}
+
+function requiredString(value, fieldName, email, rank) {
+  const text = String(value ?? '').trim();
+
+  if (!text) {
+    throw new Error(
+      `Missing required field "${fieldName}" for ${email}, rank ${rank}.`
+    );
+  }
+
+  return text;
+}
+
+function validateLocalizedFields(row) {
+  const email = String(row.menteeEmail ?? '').trim().toLowerCase() || '(missing email)';
+  const rank = String(row.rank ?? '').trim() || '(missing rank)';
+
+  requiredString(row.mentorName, 'mentorName', email, rank);
+  requiredString(row.mentorBioEn, 'mentorBioEn', email, rank);
+  requiredString(row.mentorBioHe, 'mentorBioHe', email, rank);
+  requiredString(
+    row.mentorProfessionalBackgroundEn,
+    'mentorProfessionalBackgroundEn',
+    email,
+    rank
+  );
+  requiredString(
+    row.mentorProfessionalBackgroundHe,
+    'mentorProfessionalBackgroundHe',
+    email,
+    rank
+  );
+  parseRequiredJsonArray(row.mentorInterestsEn, 'mentorInterestsEn');
+  parseRequiredJsonArray(row.mentorInterestsHe, 'mentorInterestsHe');
+  parseRequiredJsonArray(row.reasonsEn, 'reasonsEn');
+  parseRequiredJsonArray(row.reasonsHe, 'reasonsHe');
+  parseRequiredJsonArray(row.matchedAreasEn, 'matchedAreasEn');
+  parseRequiredJsonArray(row.matchedAreasHe, 'matchedAreasHe');
+}
+
+function getMenteeNames(displayName) {
+  if (typeof displayName !== 'string') {
+    return { firstName: '', lastName: '' };
+  }
+
+  const nameParts = displayName.trim().split(/\s+/).filter(Boolean);
+
+  if (nameParts.length < 2) {
+    return { firstName: '', lastName: '' };
+  }
+
+  return {
+    firstName: nameParts[0],
+    lastName: nameParts.slice(1).join(' ')
+  };
 }
 
 function toTimestamp(value) {
@@ -139,6 +210,11 @@ function toTimestamp(value) {
   return Timestamp.now();
 }
 
+// Validate the bilingual payload for every row before any existing matches are replaced.
+for (const row of rows) {
+  validateLocalizedFields(row);
+}
+
 const rowsByMentee = new Map();
 
 for (const row of rows) {
@@ -164,28 +240,28 @@ console.log('');
 for (const [email, menteeRows] of rowsByMentee.entries()) {
   console.log(`Processing ${email}...`);
 
-  const menteeSnapshot = await db
-    .collection('mentees')
-    .where('email', '==', email)
-    .get();
+  let authUser;
 
-  if (menteeSnapshot.empty) {
-    throw new Error(
-      `No mentee found in Firestore with email: ${email}`
-    );
+  try {
+    authUser = await auth.getUserByEmail(email);
+  } catch (error) {
+    if (error?.code === 'auth/user-not-found') {
+      throw new Error(
+        `No Firebase Auth user found for ${email}. Create the Auth user first, then run this import again.`
+      );
+    }
+
+    throw error;
   }
 
-  if (menteeSnapshot.size > 1) {
-    throw new Error(
-      `More than one mentee found with email: ${email}`
-    );
-  }
-
-  const menteeDocument = menteeSnapshot.docs[0];
-
-  // By our MVP convention:
-  // mentees/{documentId} === Firebase Auth UID === menteeId
-  const menteeId = menteeDocument.id;
+  // Firebase Authentication is the canonical source for the mentee UID.
+  const menteeId = authUser.uid;
+  const userRef = db.collection('users').doc(menteeId);
+  const menteeRef = db.collection('mentees').doc(menteeId);
+  const [userSnapshot, menteeSnapshot] = await Promise.all([
+    userRef.get(),
+    menteeRef.get()
+  ]);
 
   const sortedRows = [...menteeRows].sort(
     (a, b) => Number(a.rank) - Number(b.rank)
@@ -203,6 +279,25 @@ for (const [email, menteeRows] of rowsByMentee.entries()) {
     .get();
 
   const batch = db.batch();
+
+  if (!userSnapshot.exists) {
+    batch.set(userRef, {
+      email,
+      role: 'mentee'
+    });
+  }
+
+  if (!menteeSnapshot.exists) {
+    const { firstName, lastName } = getMenteeNames(authUser.displayName);
+
+    batch.set(menteeRef, {
+      email,
+      firstName,
+      lastName,
+      status: 'active',
+      createdAt: Timestamp.now()
+    });
+  }
 
   // Replace only this mentee's old matches.
   for (const document of existingMatches.docs) {
@@ -229,6 +324,37 @@ for (const [email, menteeRows] of rowsByMentee.entries()) {
       );
     }
 
+    const mentorBio = {
+      en: requiredString(row.mentorBioEn, 'mentorBioEn', email, rank),
+      he: requiredString(row.mentorBioHe, 'mentorBioHe', email, rank)
+    };
+    const mentorProfessionalBackground = {
+      en: requiredString(
+        row.mentorProfessionalBackgroundEn,
+        'mentorProfessionalBackgroundEn',
+        email,
+        rank
+      ),
+      he: requiredString(
+        row.mentorProfessionalBackgroundHe,
+        'mentorProfessionalBackgroundHe',
+        email,
+        rank
+      )
+    };
+    const mentorInterests = {
+      en: parseRequiredJsonArray(row.mentorInterestsEn, 'mentorInterestsEn'),
+      he: parseRequiredJsonArray(row.mentorInterestsHe, 'mentorInterestsHe')
+    };
+    const reasons = {
+      en: parseRequiredJsonArray(row.reasonsEn, 'reasonsEn'),
+      he: parseRequiredJsonArray(row.reasonsHe, 'reasonsHe')
+    };
+    const matchedAreas = {
+      en: parseRequiredJsonArray(row.matchedAreasEn, 'matchedAreasEn'),
+      he: parseRequiredJsonArray(row.matchedAreasHe, 'matchedAreasHe')
+    };
+
     const matchRef = db.collection('matches').doc();
 
     batch.set(matchRef, {
@@ -236,26 +362,12 @@ for (const [email, menteeRows] of rowsByMentee.entries()) {
       rank,
       matchScore,
 
-      mentorName: String(row.mentorName).trim(),
-      mentorBio: String(row.mentorBio).trim(),
-      mentorProfessionalBackground: String(
-        row.mentorProfessionalBackground
-      ).trim(),
-
-      mentorInterests: parseJsonArray(
-        row.mentorInterests,
-        'mentorInterests'
-      ),
-
-      reasons: parseJsonArray(
-        row.reasons,
-        'reasons'
-      ),
-
-      matchedAreas: parseJsonArray(
-        row.matchedAreas,
-        'matchedAreas'
-      ),
+      mentorName: requiredString(row.mentorName, 'mentorName', email, rank),
+      mentorBio,
+      mentorProfessionalBackground,
+      mentorInterests,
+      reasons,
+      matchedAreas,
 
       decision: String(row.decision || 'pending').trim(),
 

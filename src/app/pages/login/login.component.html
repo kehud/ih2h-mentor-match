@@ -1,5 +1,9 @@
 <main class="login-page">
   <section class="login-card" [class.is-transitioning]="loading" aria-labelledby="login-title">
+    <div class="language-switch" [attr.aria-label]="languageService.t('languageSwitcher')">
+      <button type="button" [class.is-active]="languageService.language() === 'en'" (click)="languageService.setLanguage('en')">{{ languageService.t('english') }}</button>
+      <button type="button" [class.is-active]="languageService.language() === 'he'" (click)="languageService.setLanguage('he')">{{ languageService.t('hebrew') }}</button>
+    </div>
     <header class="login-brand">
       <img class="login-logo" src="assets/ih2h-logo.png" alt="Israel Heart 2 Heart">
       <div>
@@ -8,23 +12,24 @@
       </div>
     </header>
 
-    <p class="login-intro">Sign in to view your mentor matches</p>
+    <p class="login-intro">{{ languageService.t('signInToViewMatches') }}</p>
 
     <form (ngSubmit)="login()" [attr.aria-busy]="loading">
       <div class="field">
-        <label for="email">Email</label>
+        <label for="email">{{ languageService.t('email') }}</label>
         <input
           id="email"
           name="email"
           type="email"
           [(ngModel)]="email"
           autocomplete="email"
+          dir="ltr"
           required
         />
       </div>
 
       <div class="field">
-        <label for="password">Password</label>
+        <label for="password">{{ languageService.t('password') }}</label>
         <input
           id="password"
           name="password"
@@ -36,7 +41,7 @@
       </div>
 
       <button class="sign-in-button" type="submit" [class.is-loading]="loading" [disabled]="loading">
-        {{ loading ? 'Signing in...' : 'Sign in' }}
+        {{ loading ? languageService.t('signingIn') : languageService.t('signIn') }}
       </button>
     </form>
 
@@ -48,7 +53,7 @@
   <div class="auth-transition-overlay" [class.is-hidden]="!loading" role="status" [attr.aria-hidden]="!loading">
     <div>
       <img class="auth-transition-logo" src="assets/ih2h-logo.png" alt="">
-      <strong>Signing you in…</strong>
+      <strong>{{ languageService.t('signingYouIn') }}</strong>
     </div>
   </div>
 </main>

@@ -1,4 +1,5 @@
 export interface AppUser {
   email: string;
-  role: 'mentee';
+  role: 'admin' | 'mentee';
+  lastLoginAt?: unknown;
 }

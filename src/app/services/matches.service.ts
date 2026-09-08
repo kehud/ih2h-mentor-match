@@ -20,6 +20,10 @@ interface MentorAssignment {
   menteeUid: string;
 }
 
+const unavailableAssignment: MentorAssignment = {
+  menteeUid: '__unavailable__'
+};
+
 export class MentorUnavailableError extends Error {
   constructor() {
     super('This mentor is no longer available.');
@@ -97,7 +101,12 @@ export class MatchesService {
                   );
                   publishAvailableMatches();
                 },
-                error => subscriber.error(error)
+                () => {
+                  // A mentor assigned to somebody else is intentionally not readable
+                  // by mentees. Treat that denied lookup as unavailable in the UI.
+                  mentorAssignments.set(mentorKey, unavailableAssignment);
+                  publishAvailableMatches();
+                }
               )
             );
 
@@ -190,6 +199,7 @@ export class MatchesService {
 
     transaction.set(menteeRef, {
       selectedMentorKey: mentorKey,
+      selectedMentorRank: match.rank,
       selectedAt: selectionTimestamp
     }, { merge: true });
     transaction.update(matchRef, { decision: 'selected' });

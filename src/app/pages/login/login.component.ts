@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { Firestore, doc, getDoc, serverTimestamp, updateDoc } from '@angular/fire/firestore';
 
 import { AuthService } from '../../services/auth.service';
 import { LanguageService } from '../../services/language.service';
@@ -14,6 +15,7 @@ import { LanguageService } from '../../services/language.service';
 })
 export class LoginComponent {
   private readonly authService = inject(AuthService);
+  private readonly firestore = inject(Firestore);
   private readonly router = inject(Router);
   readonly languageService = inject(LanguageService);
 
@@ -35,13 +37,14 @@ export class LoginComponent {
     this.errorMessage = '';
 
     try {
-      await this.authService.login(
+      const user = await this.authService.login(
         this.email.trim(),
         this.password
       );
 
+      await this.recordLastLogin(user.uid);
       await this.waitForBrandedTransition();
-      await this.router.navigateByUrl('/matches');
+      await this.router.navigateByUrl(await this.getPostLoginRoute(user.uid));
     } catch (error: any) {
       console.error('Login failed:', error);
 
@@ -72,5 +75,21 @@ export class LoginComponent {
     if (remainingDuration) {
       await new Promise<void>(resolve => setTimeout(resolve, remainingDuration));
     }
+  }
+
+  private async getPostLoginRoute(uid: string): Promise<string> {
+    try {
+      const userSnapshot = await getDoc(doc(this.firestore, `users/${uid}`));
+
+      return userSnapshot.data()?.['role'] === 'admin' ? '/admin' : '/matches';
+    } catch {
+      return '/matches';
+    }
+  }
+
+  private async recordLastLogin(uid: string): Promise<void> {
+    await updateDoc(doc(this.firestore, `users/${uid}`), {
+      lastLoginAt: serverTimestamp()
+    });
   }
 }

@@ -3,27 +3,41 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // User can read only his own user document
-    match /users/{userId} {
-      allow read: if request.auth != null
-                  && request.auth.uid == userId;
+    function isAdmin() {
+      return request.auth != null
+             && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+             && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
 
-      allow write: if false;
+    // Users can read their own record; admins can list role records for the
+    // dashboard's mentee exclusion and last-login display.
+    match /users/{userId} {
+      allow get: if request.auth != null && request.auth.uid == userId;
+      allow list: if isAdmin()
+                  && (resource.data.role == 'admin' || resource.data.role == 'mentee');
+
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys()
+                         .hasOnly(['lastLoginAt'])
+                    && request.resource.data.lastLoginAt == request.time;
+      allow create, delete: if false;
     }
 
     // Mentee can read only his own profile
     match /mentees/{menteeId} {
-      allow read: if request.auth != null
-                  && request.auth.uid == menteeId;
+      allow read: if isAdmin()
+                  || (request.auth != null && request.auth.uid == menteeId);
 
       allow update: if request.auth != null
                     && request.auth.uid == menteeId
                     && !('selectedMentorKey' in resource.data)
                     && request.resource.data.diff(resource.data)
                          .affectedKeys()
-                         .hasOnly(['selectedMentorKey', 'selectedAt'])
+                         .hasOnly(['selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
                     && request.resource.data.keys()
-                         .hasAll(['selectedMentorKey', 'selectedAt'])
+                         .hasAll(['selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
                     && existsAfter(/databases/$(database)/documents/mentorAssignments/$(request.resource.data.selectedMentorKey))
                     && getAfter(/databases/$(database)/documents/mentorAssignments/$(request.resource.data.selectedMentorKey))
                          .data.menteeUid == request.auth.uid;
@@ -48,7 +62,14 @@ service cloud.firestore {
 
     // Opaque assignment records used by the final-selection transaction.
     match /mentorAssignments/{mentorKey} {
-      allow read: if request.auth != null;
+      // Mentees can check an unassigned mentor or read their own assignment only.
+      // An assignment owned by another mentee is deliberately unreadable; the UI
+      // treats that denied lookup as an unavailable mentor.
+      allow get: if isAdmin()
+                 || (request.auth != null
+                     && (!exists(/databases/$(database)/documents/mentorAssignments/$(mentorKey))
+                         || resource.data.menteeUid == request.auth.uid));
+      allow list: if isAdmin();
       allow create: if request.auth != null
                     && request.resource.data.keys()
                          .hasOnly(['menteeUid', 'assignedAt'])
@@ -59,9 +80,10 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Private importer-only mentor details. The Admin SDK bypasses these rules.
+    // Admin-only mentor details. The Admin SDK bypasses these rules.
     match /adminMentors/{mentorKey} {
-      allow read, write: if false;
+      allow read: if isAdmin();
+      allow write: if false;
     }
   }
 }

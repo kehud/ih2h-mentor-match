@@ -4,5 +4,6 @@ export interface Mentee {
   lastName: string;
   status: 'active' | 'inactive';
   selectedMentorKey?: string;
+  selectedMentorRank?: number;
   selectedAt?: unknown;
 }

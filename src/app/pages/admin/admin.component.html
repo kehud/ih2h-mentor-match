@@ -1,0 +1,233 @@
+<main class="admin-page">
+  <header class="topbar">
+    <a class="brand" routerLink="/admin" aria-label="MentorMatch admin home">
+      <img class="brand-mark" src="assets/ih2h-logo.png" alt="">
+      <span>
+        <strong>MentorMatch</strong>
+        <small>Admin panel</small>
+      </span>
+    </a>
+    <button class="logout-button" type="button" (click)="logout()">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 7l5 5-5 5M19 12H8M11 4H5a2 2 0 00-2 2v12a2 2 0 002 2h6"/></svg>
+      Sign out
+    </button>
+  </header>
+
+  @if (dashboard; as dashboard) {
+    <section class="admin-content" aria-labelledby="admin-title">
+      <div class="intro-row">
+        <div class="intro">
+          <p class="eyebrow">Mentor program</p>
+          <h1 id="admin-title">Admin overview</h1>
+          <p>Current mentor selections and mentee status.</p>
+        </div>
+        <div class="refresh-control">
+          <span>Last updated: {{ formatLastUpdated() }}</span>
+          <button class="refresh-button" type="button" [disabled]="isLoading" (click)="refresh()">
+            {{ isLoading ? 'Refreshing…' : 'Refresh' }}
+          </button>
+        </div>
+      </div>
+
+      <section class="summary-grid" aria-label="Program summary">
+        <article class="summary-card">
+          <span>Total mentees</span>
+          <strong>{{ dashboard.totalMentees }}</strong>
+        </article>
+        <article class="summary-card selected">
+          <span>Selected</span>
+          <strong>{{ dashboard.selectedCount }}</strong>
+        </article>
+        <article class="summary-card waiting">
+          <span>Waiting</span>
+          <strong>{{ dashboard.waitingCount }}</strong>
+        </article>
+        <article class="summary-card">
+          <span>Assigned mentors</span>
+          <strong>{{ dashboard.assignedMentorsCount }}</strong>
+        </article>
+        <article class="summary-card progress-card">
+          <span>Selection progress</span>
+          <strong>{{ dashboard.selectedCount }} / {{ dashboard.totalMentees }}</strong>
+          <small>{{ dashboard.selectionPercentage }}% selected</small>
+        </article>
+        <article class="summary-card never-login-card">
+          <span>Never logged in</span>
+          <strong>{{ dashboard.neverLoggedInCount }}</strong>
+        </article>
+      </section>
+
+      <section class="recent-card" aria-labelledby="recent-selections-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Activity</p>
+            <h2 id="recent-selections-title">Recent selections</h2>
+          </div>
+          <span>Last 5</span>
+        </div>
+        @if (dashboard.recentSelections.length) {
+          <div class="recent-list">
+            @for (selection of dashboard.recentSelections; track selection.id) {
+              <article class="recent-row">
+                <div>
+                  <strong>{{ getMenteeName(selection) }}</strong>
+                  <small>{{ selection.mentorName ?? 'Mentor unavailable' }}</small>
+                </div>
+                <div class="recent-meta">
+                  <span>Rank {{ selection.selectedMentorRank ?? '—' }}</span>
+                  <small>{{ formatSelectedAt(selection.selectedAt) }}</small>
+                </div>
+              </article>
+            }
+          </div>
+        } @else {
+          <p class="empty-state">No mentor selections yet.</p>
+        }
+      </section>
+
+      <nav class="view-tabs" aria-label="Admin data views">
+        <button type="button" [class.is-active]="activeView === 'mentees'" (click)="activeView = 'mentees'">Mentees</button>
+        <button type="button" [class.is-active]="activeView === 'mentors'" (click)="activeView = 'mentors'">Mentors</button>
+      </nav>
+
+      @if (activeView === 'mentees') {
+      <section class="table-card" aria-labelledby="mentees-title">
+        <div class="table-heading">
+          <div>
+            <p class="eyebrow">Mentees</p>
+            <h2 id="mentees-title">Selection status</h2>
+          </div>
+          <span>{{ filteredRows.length }} of {{ dashboard.totalMentees }} shown</span>
+        </div>
+
+        <div class="table-controls">
+          <label class="search-field" for="mentee-search">
+            <span>Search</span>
+            <input id="mentee-search" type="search" [(ngModel)]="searchTerm" placeholder="Mentee, email, or mentor" autocomplete="off">
+          </label>
+          <div class="filter-group" role="group" aria-label="Filter by selection status">
+            <button type="button" [class.is-active]="selectedFilter === 'all'" (click)="setFilter('all')">All</button>
+            <button type="button" [class.is-active]="selectedFilter === 'waiting'" (click)="setFilter('waiting')">Waiting</button>
+            <button type="button" [class.is-active]="selectedFilter === 'selected'" (click)="setFilter('selected')">Selected</button>
+          </div>
+          <button class="export-button" type="button" [disabled]="!filteredRows.length || isExporting" (click)="exportWorkbook()">{{ isExporting ? 'Exporting…' : 'Export Excel' }}</button>
+        </div>
+
+        @if (filteredRows.length) {
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('name')">Mentee <span>{{ sortIndicator('name') }}</span></button></th>
+                  <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('status')">Status <span>{{ sortIndicator('status') }}</span></button></th>
+                  <th scope="col">Selected mentor</th>
+                  <th scope="col">Mentor email</th>
+                  <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('selectedRank')">Selected rank <span>{{ sortIndicator('selectedRank') }}</span></button></th>
+                  <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('selectedAt')">Selected at <span>{{ sortIndicator('selectedAt') }}</span></button></th>
+                  <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('lastLoginAt')">Last login <span>{{ sortIndicator('lastLoginAt') }}</span></button></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of filteredRows; track row.id) {
+                  <tr>
+                    <td>
+                      <strong>{{ getMenteeName(row) }}</strong>
+                      <small>{{ row.email }}</small>
+                    </td>
+                    <td><span class="status" [class.waiting]="row.selectionStatus === 'waiting'">{{ row.selectionStatus }}</span></td>
+                    <td>{{ row.mentorName ?? '—' }}</td>
+                    <td>
+                      @if (row.mentorEmail; as mentorEmail) {
+                        <div class="email-action">
+                          <span>{{ mentorEmail }}</span>
+                          <button type="button" (click)="copyMentorEmail(mentorEmail)">{{ copiedMentorEmail === mentorEmail ? 'Copied' : 'Copy' }}</button>
+                        </div>
+                      } @else {
+                        —
+                      }
+                    </td>
+                    <td>{{ row.selectionStatus === 'selected' ? (row.selectedMentorRank ?? '—') : '—' }}</td>
+                    <td>{{ formatSelectedAt(row.selectedAt) }}</td>
+                    <td>{{ formatLastLogin(row.lastLoginAt) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="empty-state">{{ dashboard.rows.length ? 'No mentees match this search or filter.' : 'No mentees have been imported yet.' }}</p>
+        }
+      </section>
+      } @else {
+      <section class="table-card" aria-labelledby="mentors-title">
+        <div class="table-heading">
+          <div>
+            <p class="eyebrow">Mentors</p>
+            <h2 id="mentors-title">Mentor availability</h2>
+          </div>
+          <span>{{ filteredMentorRows.length }} of {{ dashboard.mentorRows.length }} shown</span>
+        </div>
+
+        <div class="table-controls">
+          <label class="search-field" for="mentor-search">
+            <span>Search</span>
+            <input id="mentor-search" type="search" [(ngModel)]="mentorSearchTerm" placeholder="Mentor or assigned mentee" autocomplete="off">
+          </label>
+          <div class="filter-group" role="group" aria-label="Filter by mentor availability">
+            <button type="button" [class.is-active]="mentorFilter === 'all'" (click)="setMentorFilter('all')">All</button>
+            <button type="button" [class.is-active]="mentorFilter === 'available'" (click)="setMentorFilter('available')">Available</button>
+            <button type="button" [class.is-active]="mentorFilter === 'assigned'" (click)="setMentorFilter('assigned')">Assigned</button>
+          </div>
+          <button class="export-button" type="button" [disabled]="!filteredMentorRows.length || isExporting" (click)="exportWorkbook()">{{ isExporting ? 'Exporting…' : 'Export Excel' }}</button>
+        </div>
+
+        @if (filteredMentorRows.length) {
+          <div class="table-scroll">
+            <table class="mentors-table">
+              <thead>
+                <tr>
+                  <th scope="col">Mentor</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Assigned mentee</th>
+                  <th scope="col">Assigned at</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (mentor of filteredMentorRows; track mentor.id) {
+                  <tr>
+                    <td><strong>{{ mentor.mentorFullName ?? '—' }}</strong></td>
+                    <td>{{ mentor.mentorEmail ?? '—' }}</td>
+                    <td><span class="status" [class.available]="mentor.assignmentStatus === 'available'" [class.assigned]="mentor.assignmentStatus === 'assigned'">{{ mentor.assignmentStatus }}</span></td>
+                    <td>
+                      @if (mentor.assignedMenteeName; as assignedMenteeName) {
+                        <strong>{{ assignedMenteeName }}</strong>
+                        <small>{{ mentor.assignedMenteeEmail }}</small>
+                      } @else {
+                        —
+                      }
+                    </td>
+                    <td>{{ formatSelectedAt(mentor.assignedAt) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="empty-state">No mentors match this search or filter.</p>
+        }
+      </section>
+      }
+    </section>
+  } @else if (isLoading) {
+    <section class="admin-content access-state" aria-live="polite">
+      <h1>Loading admin panel</h1>
+    </section>
+  } @else {
+    <section class="admin-content access-state" role="alert">
+      <h1>Unable to load the admin panel</h1>
+      <p>Your account no longer has permission to read this data.</p>
+      <button class="refresh-button" type="button" (click)="refresh()">Refresh</button>
+    </section>
+  }
+</main>

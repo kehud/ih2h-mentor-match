@@ -67,6 +67,7 @@ await db.runTransaction(async transaction => {
   transaction.delete(assignmentRef);
   transaction.update(menteeRef, {
     selectedMentorKey: FieldValue.delete(),
+    selectedMentorRank: FieldValue.delete(),
     selectedAt: FieldValue.delete()
   });
   transaction.update(selectedMatches[0].ref, { decision: 'pending' });

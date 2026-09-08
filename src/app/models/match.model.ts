@@ -7,11 +7,12 @@ export interface Match {
   id?: string;
 
   menteeId: string;
+  mentorKey: string;
 
   rank: number;
   matchScore: number;
 
-  mentorName: string;
+  mentorDisplayName: string;
   mentorBio: LegacyLocalizedField<string>;
   mentorProfessionalBackground: LegacyLocalizedField<string>;
 

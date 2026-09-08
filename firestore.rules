@@ -1,0 +1,67 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // User can read only his own user document
+    match /users/{userId} {
+      allow read: if request.auth != null
+                  && request.auth.uid == userId;
+
+      allow write: if false;
+    }
+
+    // Mentee can read only his own profile
+    match /mentees/{menteeId} {
+      allow read: if request.auth != null
+                  && request.auth.uid == menteeId;
+
+      allow update: if request.auth != null
+                    && request.auth.uid == menteeId
+                    && !('selectedMentorKey' in resource.data)
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys()
+                         .hasOnly(['selectedMentorKey', 'selectedAt'])
+                    && request.resource.data.keys()
+                         .hasAll(['selectedMentorKey', 'selectedAt'])
+                    && existsAfter(/databases/$(database)/documents/mentorAssignments/$(request.resource.data.selectedMentorKey))
+                    && getAfter(/databases/$(database)/documents/mentorAssignments/$(request.resource.data.selectedMentorKey))
+                         .data.menteeUid == request.auth.uid;
+
+      allow create, delete: if false;
+    }
+
+    // Mentee can read only his own matches
+    match /matches/{matchId} {
+      allow read: if request.auth != null
+                  && resource.data.menteeId == request.auth.uid;
+
+      // Later the app may update Like / Pass / Selected
+      allow update: if request.auth != null
+                    && resource.data.menteeId == request.auth.uid
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys()
+                         .hasOnly(['decision']);
+
+      allow create, delete: if false;
+    }
+
+    // Opaque assignment records used by the final-selection transaction.
+    match /mentorAssignments/{mentorKey} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.keys()
+                         .hasOnly(['menteeUid', 'assignedAt'])
+                    && request.resource.data.menteeUid == request.auth.uid
+                    && existsAfter(/databases/$(database)/documents/mentees/$(request.auth.uid))
+                    && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid))
+                         .data.selectedMentorKey == mentorKey;
+      allow update, delete: if false;
+    }
+
+    // Private importer-only mentor details. The Admin SDK bypasses these rules.
+    match /adminMentors/{mentorKey} {
+      allow read, write: if false;
+    }
+  }
+}

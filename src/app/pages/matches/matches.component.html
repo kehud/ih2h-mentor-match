@@ -16,15 +16,19 @@
     </button>
   </header>
 
-  @if (matchesState$ | async; as matchesState) {
-    @if (matchesState.hasError) {
+  @if (selectionMessage && !isSelectionError()) {
+    <p class="selection-message" role="status" aria-live="polite">{{ languageService.t(selectionMessage) }}</p>
+  }
+
+  @if (viewState$ | async; as viewState) {
+    @if (viewState.hasError) {
       <section class="empty-state matches-error-state">
         <h1>{{ languageService.t('couldNotLoadMatches') }}</h1>
         <p>{{ languageService.t('pleaseTryAgain') }}</p>
         <button class="matches-retry" type="button" (click)="retryMatches()">{{ languageService.t('tryAgain') }}</button>
       </section>
     } @else {
-      @if (matchesState.matches; as matches) {
+      @if (viewState.matches; as matches) {
         @if (getActiveMatch(matches); as match) {
       <section class="matches-intro" aria-labelledby="matches-title">
         <h1 id="matches-title">{{ languageService.t('yourMentorMatches') }}</h1>
@@ -53,9 +57,9 @@
 
           <div class="mentor-overview">
             <div class="mentor-details">
-              <h2>{{ getMentorFirstName(match.mentorName) }}</h2>
+              <h2>{{ getMentorFirstName(match.mentorDisplayName) }}</h2>
               <section class="mentor-introduction">
-                <h3 class="mentor-section-label">{{ languageService.t('aboutMentor', { name: getMentorFirstName(match.mentorName) }) }}</h3>
+                <h3 class="mentor-section-label">{{ languageService.t('aboutMentor', { name: getMentorFirstName(match.mentorDisplayName) }) }}</h3>
                 <p class="mentor-bio">{{ getLocalizedText(match.mentorBio) }}</p>
               </section>
               <section class="professional-background-section">
@@ -92,11 +96,15 @@
           </button>
 
           <div class="actions">
-            <button class="pass" type="button" [class.is-selected]="getDecision(match) === 'passed'" [disabled]="updatingMatchId === match.id" (click)="handleDecisionClick($event, match, 'passed')"><span aria-hidden="true">×</span>{{ getDecision(match) === 'passed' ? languageService.t('passed') : languageService.t('notRightFit') }}</button>
-            <button class="interested" type="button" [class.is-selected]="getDecision(match) === 'liked'" [disabled]="updatingMatchId === match.id" (click)="handleDecisionClick($event, match, 'liked')"><span aria-hidden="true">♡</span>{{ getDecision(match) === 'liked' ? languageService.t('interestedSelected') : languageService.t('interested') }}</button>
-            <button class="select" type="button" [class.is-selected]="getDecision(match) === 'selected'" [disabled]="updatingMatchId === match.id || (hasSelectedMatch(matches) && getDecision(match) !== 'selected')" (click)="handleDecisionClick($event, match, 'selected')"><span aria-hidden="true">♧</span>{{ getDecision(match) === 'selected' ? languageService.t('selected') : languageService.t('likeToConnect') }}</button>
+            @if (!isFinalSelectionLocked(viewState.mentee)) {
+              <button class="select" type="button" [disabled]="isFinalSelectionInProgress" (click)="chooseMentor($event, match, viewState.mentee)"><span aria-hidden="true">♧</span>{{ isFinalSelectionInProgress ? languageService.t('selecting') : languageService.t('likeToConnect') }}</button>
+            }
           </div>
-          <p class="choice-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-3 8.4-7 10-4-1.6-7-5.6-7-10V6l7-3zM9 12l2 2 4-5"/></svg>{{ languageService.t('choiceNote') }}</p>
+          @if (isSelectedMentor(match, viewState.mentee)) {
+            <p class="mentor-selected-status" role="status"><span aria-hidden="true">✓</span>{{ languageService.t('mentorSelected') }}</p>
+          } @else if (!isFinalSelectionLocked(viewState.mentee)) {
+            <p class="choice-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-3 8.4-7 10-4-1.6-7-5.6-7-10V6l7-3zM9 12l2 2 4-5"/></svg>{{ languageService.t('choiceNote') }}</p>
+          }
         </article>
 
         <div class="pagination" [attr.aria-label]="languageService.t('matchNavigation')">
@@ -111,13 +119,12 @@
       </section>
 
       <div class="mobile-floating-progress" [attr.aria-label]="languageService.t('mentorMatchNavigation')">
-        @for (dot of swipeProgressDots; track dot) {
+        @for (item of matches; track item.id; let index = $index) {
           <button
             type="button"
-            [class.active]="dot === getActiveMatchIndex(matches)"
-            [disabled]="dot >= matches.length"
-            (click)="showMatch(dot)"
-            [attr.aria-label]="languageService.t('showMentorMatch', { number: dot + 1 })"></button>
+            [class.active]="index === getActiveMatchIndex(matches)"
+            (click)="showMatch(index)"
+            [attr.aria-label]="languageService.t('showMentorMatch', { number: index + 1 })"></button>
         }
       </div>
         } @else {
@@ -141,4 +148,27 @@
       <strong>{{ languageService.t('signingYouOut') }}</strong>
     </div>
   </div>
+
+  @if (pendingMentorSelection) {
+    <div class="auth-transition-overlay selection-confirmation-overlay" role="dialog" aria-modal="true" aria-labelledby="final-selection-confirmation">
+      <div>
+        <img class="auth-transition-logo" src="assets/ih2h-logo.png" alt="">
+        <strong id="final-selection-confirmation">{{ languageService.t('confirmMentorSelection') }}</strong>
+        <div class="selection-modal-actions">
+          <button class="matches-retry" type="button" [disabled]="isFinalSelectionInProgress" (click)="cancelMentorSelection()">{{ languageService.t('cancel') }}</button>
+          <button class="matches-retry selection-modal-confirm" type="button" [disabled]="isFinalSelectionInProgress" (click)="confirmMentorSelection()">{{ isFinalSelectionInProgress ? languageService.t('selecting') : languageService.t('confirm') }}</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (selectionMessage && isSelectionError()) {
+    <div class="auth-transition-overlay selection-error-overlay" role="alert" aria-live="assertive">
+      <div>
+        <img class="auth-transition-logo" src="assets/ih2h-logo.png" alt="">
+        <strong>{{ languageService.t(selectionMessage) }}</strong>
+        <button class="matches-retry" type="button" (click)="dismissSelectionMessage()">{{ languageService.t('close') }}</button>
+      </div>
+    </div>
+  }
 </main>

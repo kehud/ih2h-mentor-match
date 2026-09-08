@@ -14,7 +14,12 @@ import {
 
 import { Match } from '../../models/match.model';
 import type { LegacyLocalizedField } from '../../models/match.model';
-import { MatchesService } from '../../services/matches.service';
+import { Mentee } from '../../models/mentee.model';
+import {
+  MatchesService,
+  MenteeAlreadySelectedError,
+  MentorUnavailableError
+} from '../../services/matches.service';
 import { MenteeService } from '../../services/mentee.service';
 import { AuthService } from '../../services/auth.service';
 import { LanguageService } from '../../services/language.service';
@@ -34,7 +39,6 @@ export class MatchesComponent {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly refreshMatches$ = new BehaviorSubject<void>(undefined);
-  private readonly decisionOverrides = new Map<string, Match['decision']>();
 
   readonly matchesState$ = this.refreshMatches$.pipe(
     switchMap(() => this.matchesService.getMyMatches().pipe(
@@ -47,26 +51,35 @@ export class MatchesComponent {
     catchError(() => of(null)),
     shareReplay({ bufferSize: 1, refCount: true })
   );
-  readonly swipeProgressDots = [0, 1, 2, 3, 4];
-
-  updatingMatchId: string | null = null;
+  readonly viewState$ = combineLatest([this.matchesState$, this.mentee$]).pipe(
+    map(([matchesState, mentee]) => ({ ...matchesState, mentee })),
+    shareReplay({ bufferSize: 1, refCount: true })
+  );
   currentMatchIndex = 0;
   expandedMatchId: string | null = null;
   isMatchesLoading = true;
   isLoggingOut = false;
+  isFinalSelectionInProgress = false;
+  pendingMentorSelection: Match | null = null;
+  private finalSelectionMentorKey: string | null = null;
+  selectionMessage: 'selectionSaved' | 'unavailable' | 'alreadySelected' | 'error' | null = null;
   private touchStart: { x: number; y: number } | null = null;
   private suppressDecisionClick = false;
   private loadingStartedAt = Date.now();
   private loadingTimeout: ReturnType<typeof setTimeout> | null = null;
   private swipeFeedbackTimeout: ReturnType<typeof setTimeout> | null = null;
+  private visibleMatchIds: string[] = [];
   swipeTransition: 'outgoing-left' | 'outgoing-right' | 'incoming-left' | 'incoming-right' | null = null;
 
   constructor() {
     this.resetMobileScrollPosition();
 
-    combineLatest([this.matchesState$, this.mentee$])
+    this.viewState$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.finishLoading());
+      .subscribe(viewState => {
+        this.reconcileVisibleMatchIndex(viewState.matches);
+        this.finishLoading();
+      });
 
     this.destroyRef.onDestroy(() => {
       if (this.loadingTimeout) {
@@ -81,6 +94,32 @@ export class MatchesComponent {
 
   getActiveMatch(matches: Match[]): Match | null {
     return matches[this.getActiveMatchIndex(matches)] ?? null;
+  }
+
+  private reconcileVisibleMatchIndex(matches: Match[]): void {
+    const currentMatchId = this.visibleMatchIds[this.getActiveMatchIndexFromLength(this.visibleMatchIds.length)];
+
+    if (currentMatchId) {
+      const currentMatchIndex = matches.findIndex(match => this.getMatchKey(match) === currentMatchId);
+
+      if (currentMatchIndex >= 0) {
+        this.currentMatchIndex = currentMatchIndex;
+      } else {
+        this.currentMatchIndex = this.getActiveMatchIndex(matches);
+      }
+    } else {
+      this.currentMatchIndex = this.getActiveMatchIndex(matches);
+    }
+
+    this.visibleMatchIds = matches.map(match => this.getMatchKey(match));
+  }
+
+  private getActiveMatchIndexFromLength(length: number): number {
+    return length ? Math.min(this.currentMatchIndex, length - 1) : 0;
+  }
+
+  private getMatchKey(match: Match): string {
+    return match.id ?? match.mentorKey;
   }
 
   private finishLoading(): void {
@@ -133,8 +172,8 @@ export class MatchesComponent {
     this.currentMatchIndex = index;
   }
 
-  getMentorFirstName(mentorName: string): string {
-    return mentorName.trim().split(/\s+/)[0] ?? '';
+  getMentorFirstName(mentorDisplayName: string): string {
+    return mentorDisplayName.trim().split(/\s+/)[0] ?? '';
   }
 
   getPickLabel(rank: number): string {
@@ -162,8 +201,22 @@ export class MatchesComponent {
       : value[this.languageService.language()] ?? value.en ?? value.he ?? [];
   }
 
-  getDecision(match: Match): Match['decision'] {
-    return match.id ? (this.decisionOverrides.get(match.id) ?? match.decision) : match.decision;
+  isFinalSelectionLocked(mentee: Mentee | null): boolean {
+    return Boolean(mentee?.selectedMentorKey ?? this.finalSelectionMentorKey);
+  }
+
+  isSelectedMentor(match: Match, mentee: Mentee | null): boolean {
+    return (mentee?.selectedMentorKey ?? this.finalSelectionMentorKey) === match.mentorKey;
+  }
+
+  isSelectionError(): boolean {
+    return this.selectionMessage === 'unavailable'
+      || this.selectionMessage === 'alreadySelected'
+      || this.selectionMessage === 'error';
+  }
+
+  dismissSelectionMessage(): void {
+    this.selectionMessage = null;
   }
 
   isProfileExpanded(match: Match): boolean {
@@ -176,7 +229,7 @@ export class MatchesComponent {
   }
 
   private getProfileKey(match: Match): string {
-    return match.id ?? match.mentorName;
+    return this.getMatchKey(match);
   }
 
   onMatchTouchStart(event: TouchEvent): void {
@@ -259,46 +312,63 @@ export class MatchesComponent {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }
 
-  handleDecisionClick(
-    event: MouseEvent,
-    match: Match,
-    decision: Match['decision']
-  ): void {
-    if (this.suppressDecisionClick) {
+  chooseMentor(event: MouseEvent, match: Match, mentee: Mentee | null): void {
+    if (
+      this.suppressDecisionClick ||
+      !match.id ||
+      this.isFinalSelectionInProgress ||
+      this.pendingMentorSelection ||
+      this.isFinalSelectionLocked(mentee)
+    ) {
       event.preventDefault();
       event.stopPropagation();
       return;
     }
 
-    void this.setDecision(match, decision);
+    this.pendingMentorSelection = match;
   }
 
-  async setDecision(
-    match: Match,
-    decision: Match['decision']
-  ): Promise<void> {
+  cancelMentorSelection(): void {
+    if (!this.isFinalSelectionInProgress) {
+      this.pendingMentorSelection = null;
+    }
+  }
+
+  confirmMentorSelection(): void {
+    const match = this.pendingMentorSelection;
+
+    if (!match || this.isFinalSelectionInProgress) {
+      return;
+    }
+
+    this.isFinalSelectionInProgress = true;
+    void this.saveFinalSelection(match);
+  }
+
+  private async saveFinalSelection(match: Match): Promise<void> {
     if (!match.id) {
       return;
     }
 
-    this.decisionOverrides.set(match.id, decision);
-    this.updatingMatchId = match.id;
-
+    this.selectionMessage = null;
     try {
-      await this.matchesService.updateDecision(
-        match.id,
-        decision
-      );
+      await this.matchesService.selectMentor(match);
+      this.finalSelectionMentorKey = match.mentorKey;
+      this.selectionMessage = 'selectionSaved';
     } catch (error) {
-      this.decisionOverrides.delete(match.id);
-      console.error('Failed to update match decision:', error);
+      if (error instanceof MentorUnavailableError) {
+        this.selectionMessage = 'unavailable';
+        this.refreshMatches$.next();
+      } else if (error instanceof MenteeAlreadySelectedError) {
+        this.selectionMessage = 'alreadySelected';
+      } else {
+        this.selectionMessage = 'error';
+        console.error('Failed to save final mentor selection:', error);
+      }
     } finally {
-      this.updatingMatchId = null;
+      this.isFinalSelectionInProgress = false;
+      this.pendingMentorSelection = null;
     }
-  }
-
-  hasSelectedMatch(matches: Match[]): boolean {
-    return matches.some(match => this.getDecision(match) === 'selected');
   }
 
   async logout(): Promise<void> {

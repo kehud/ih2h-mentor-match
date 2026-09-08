@@ -9,9 +9,18 @@ body { background: #f5f3f1; }
 .auth-transition-overlay strong { font-size: 16px; }
 .auth-transition-overlay.is-hidden { visibility: hidden; opacity: 0; transition: opacity 240ms ease, visibility 0s linear 240ms; }
 .matches-retry { min-height: 40px; margin-top: 8px; padding: 0 18px; border: 1px solid #0b59c5; border-radius: 9px; color: #084ba8; background: rgba(255, 255, 255, .9); font: inherit; font-weight: 700; cursor: pointer; }
+.selection-confirmation-overlay > div { box-sizing: border-box; width: calc(100% - 48px); max-width: 420px; min-width: 0; padding: 18px 22px; }
+.selection-confirmation-overlay strong { font-size: 14px; }
+.selection-modal-actions { display: flex; gap: 10px; }
+.selection-modal-actions .matches-retry { min-height: 36px; margin-top: 0; padding: 0 16px; font-size: 14px; }
+.selection-modal-confirm { border-color: #1d7b50; color: #fff; background: linear-gradient(105deg, #197a50, #23794f); }
+.selection-modal-actions button:disabled { cursor: default; opacity: .55; }
 .mobile-status-chips, .mobile-floating-progress { display: none; }
-app-matches .actions .pass.is-selected { border-color: #b7c5d5; color: #465a72; background: #f3f6f9; }
-app-matches .actions .interested.is-selected { border-color: #82afe6; color: #084ba8; background: #eaf3ff; box-shadow: inset 0 0 0 1px rgba(102, 160, 224, .12); }
+app-matches .actions .pass, app-matches .actions .interested { border-color: #c9d2df; color: #084ba8; background: #fff; transition: border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease; }
+app-matches .actions .action-icon { display: grid; width: 24px; height: 31px; flex: 0 0 24px; place-items: center; font-size: 31px; line-height: 1; font-weight: 400; }
+app-matches .actions .action-label { white-space: nowrap; }
+app-matches .actions button.pass.is-selected, app-matches .actions button.pass.is-selected:disabled { border-color: #bd6872; color: #7d2935; background: #f6dde0; box-shadow: inset 0 0 0 1px rgba(125, 41, 53, .12); opacity: 1; }
+app-matches .actions button.interested.is-selected, app-matches .actions button.interested.is-selected:disabled { border-color: #3f8b66; color: #0f5738; background: #d5eadc; box-shadow: inset 0 0 0 1px rgba(15, 87, 56, .13); opacity: 1; }
 app-matches .actions .select.is-selected { border-color: #0e623e; background: linear-gradient(105deg, #126d45, #1b8050); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .24), 0 5px 12px rgba(19, 103, 65, .2); }
 app-matches .actions button.is-selected:disabled { opacity: 1; }
 

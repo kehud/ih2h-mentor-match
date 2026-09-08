@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHmac } from 'node:crypto';
 
 import { createRequire } from 'node:module';
 
@@ -14,10 +15,18 @@ const SERVICE_ACCOUNT_PATH = path.resolve(
 );
 
 const inputFile = process.argv[2];
+const mentorKeySecret = process.env.MENTOR_KEY_SECRET;
 
 if (!inputFile) {
   console.error(
     'Usage: npm run import-matches -- /path/to/matches_output.xlsx'
+  );
+  process.exit(1);
+}
+
+if (!mentorKeySecret) {
+  console.error(
+    'MENTOR_KEY_SECRET is required. Set it in your local environment before importing matches.'
   );
   process.exit(1);
 }
@@ -59,6 +68,7 @@ const requiredColumns = [
   'menteeEmail',
   'rank',
   'matchScore',
+  'mentorEmail',
   'mentorName',
   'mentorBioEn',
   'mentorBioHe',
@@ -130,10 +140,23 @@ function requiredString(value, fieldName, email, rank) {
   return text;
 }
 
+function getNormalizedMentorEmail(value, email, rank) {
+  return requiredString(value, 'mentorEmail', email, rank).toLowerCase();
+}
+
+function getMentorKey(normalizedMentorEmail) {
+  return `m_${createHmac('sha256', mentorKeySecret).update(normalizedMentorEmail, 'utf8').digest('hex')}`;
+}
+
+function getMentorDisplayName(mentorName) {
+  return mentorName.trim().split(/\s+/)[0];
+}
+
 function validateLocalizedFields(row) {
   const email = String(row.menteeEmail ?? '').trim().toLowerCase() || '(missing email)';
   const rank = String(row.rank ?? '').trim() || '(missing rank)';
 
+  getMentorKey(getNormalizedMentorEmail(row.mentorEmail, email, rank));
   requiredString(row.mentorName, 'mentorName', email, rank);
   requiredString(row.mentorBioEn, 'mentorBioEn', email, rank);
   requiredString(row.mentorBioHe, 'mentorBioHe', email, rank);
@@ -279,6 +302,7 @@ for (const [email, menteeRows] of rowsByMentee.entries()) {
     .get();
 
   const batch = db.batch();
+  const adminMentorKeys = new Set();
 
   if (!userSnapshot.exists) {
     batch.set(userRef, {
@@ -324,6 +348,23 @@ for (const [email, menteeRows] of rowsByMentee.entries()) {
       );
     }
 
+    const mentorName = requiredString(row.mentorName, 'mentorName', email, rank);
+    const mentorEmail = getNormalizedMentorEmail(row.mentorEmail, email, rank);
+    const mentorKey = getMentorKey(mentorEmail);
+    const mentorDisplayName = getMentorDisplayName(mentorName);
+
+    if (!adminMentorKeys.has(mentorKey)) {
+      batch.set(
+        db.collection('adminMentors').doc(mentorKey),
+        {
+          mentorFullName: mentorName,
+          mentorEmail
+        },
+        { merge: true }
+      );
+      adminMentorKeys.add(mentorKey);
+    }
+
     const mentorBio = {
       en: requiredString(row.mentorBioEn, 'mentorBioEn', email, rank),
       he: requiredString(row.mentorBioHe, 'mentorBioHe', email, rank)
@@ -359,10 +400,11 @@ for (const [email, menteeRows] of rowsByMentee.entries()) {
 
     batch.set(matchRef, {
       menteeId,
+      mentorKey,
+      mentorDisplayName,
       rank,
       matchScore,
 
-      mentorName: requiredString(row.mentorName, 'mentorName', email, rank),
       mentorBio,
       mentorProfessionalBackground,
       mentorInterests,

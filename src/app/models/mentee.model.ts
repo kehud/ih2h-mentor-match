@@ -3,4 +3,6 @@ export interface Mentee {
   firstName: string;
   lastName: string;
   status: 'active' | 'inactive';
+  selectedMentorKey?: string;
+  selectedAt?: unknown;
 }

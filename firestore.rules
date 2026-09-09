@@ -9,6 +9,52 @@ service cloud.firestore {
              && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
+    // The final mentor choice is one atomic operation. Every participating
+    // document must point to the same owned match, mentor, and mentee.
+    function hasFinalSelection(menteeId, mentorKey, matchId) {
+      return mentorKey is string
+             && matchId is string
+             && existsAfter(/databases/$(database)/documents/mentorAssignments/$(mentorKey))
+             && getAfter(/databases/$(database)/documents/mentorAssignments/$(mentorKey))
+                  .data.menteeUid == menteeId
+             && getAfter(/databases/$(database)/documents/mentorAssignments/$(mentorKey))
+                  .data.assignedAt == request.time
+             && existsAfter(/databases/$(database)/documents/mentees/$(menteeId))
+             && getAfter(/databases/$(database)/documents/mentees/$(menteeId))
+                  .data.selectedMatchId == matchId
+             && getAfter(/databases/$(database)/documents/mentees/$(menteeId))
+                  .data.selectedMentorKey == mentorKey
+             && getAfter(/databases/$(database)/documents/mentees/$(menteeId))
+                  .data.selectedAt == request.time
+             && getAfter(/databases/$(database)/documents/mentees/$(menteeId))
+                  .data.selectedMentorRank == getAfter(/databases/$(database)/documents/matches/$(matchId)).data.rank
+             && existsAfter(/databases/$(database)/documents/matches/$(matchId))
+             && getAfter(/databases/$(database)/documents/matches/$(matchId))
+                  .data.menteeId == menteeId
+             && getAfter(/databases/$(database)/documents/matches/$(matchId))
+                  .data.mentorKey == mentorKey
+             && getAfter(/databases/$(database)/documents/matches/$(matchId))
+                  .data.decision == 'selected';
+    }
+
+    function hasClearedFinalSelection(menteeId, mentorKey, matchId) {
+      return mentorKey is string
+             && matchId is string
+             && !existsAfter(/databases/$(database)/documents/mentorAssignments/$(mentorKey))
+             && existsAfter(/databases/$(database)/documents/mentees/$(menteeId))
+             && !('selectedMatchId' in getAfter(/databases/$(database)/documents/mentees/$(menteeId)).data)
+             && !('selectedMentorKey' in getAfter(/databases/$(database)/documents/mentees/$(menteeId)).data)
+             && !('selectedMentorRank' in getAfter(/databases/$(database)/documents/mentees/$(menteeId)).data)
+             && !('selectedAt' in getAfter(/databases/$(database)/documents/mentees/$(menteeId)).data)
+             && existsAfter(/databases/$(database)/documents/matches/$(matchId))
+             && getAfter(/databases/$(database)/documents/matches/$(matchId))
+                  .data.menteeId == menteeId
+             && getAfter(/databases/$(database)/documents/matches/$(matchId))
+                  .data.mentorKey == mentorKey
+             && getAfter(/databases/$(database)/documents/matches/$(matchId))
+                  .data.decision == 'pending';
+    }
+
     // Users can read their own record; admins can list role records for the
     // dashboard's mentee exclusion and last-login display.
     match /users/{userId} {
@@ -30,32 +76,137 @@ service cloud.firestore {
       allow read: if isAdmin()
                   || (request.auth != null && request.auth.uid == menteeId);
 
-      allow update: if request.auth != null
+      allow update: if (
+                      isAdmin()
+                      && (
+                        (
+                          !('selectedMatchId' in resource.data)
+                          && !('selectedMentorKey' in resource.data)
+                          && request.resource.data.diff(resource.data)
+                               .affectedKeys()
+                               .hasOnly(['selectedMatchId', 'selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
+                          && request.resource.data.keys()
+                               .hasAll(['selectedMatchId', 'selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
+                          && hasFinalSelection(menteeId, request.resource.data.selectedMentorKey, request.resource.data.selectedMatchId)
+                        )
+                        || (
+                          resource.data.selectedMatchId is string
+                          && resource.data.selectedMentorKey is string
+                          && request.resource.data.diff(resource.data)
+                               .affectedKeys()
+                               .hasOnly(['selectedMatchId', 'selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
+                          && hasClearedFinalSelection(menteeId, resource.data.selectedMentorKey, resource.data.selectedMatchId)
+                        )
+                      )
+                    )
+                    || (request.auth != null
                     && request.auth.uid == menteeId
-                    && !('selectedMentorKey' in resource.data)
-                    && request.resource.data.diff(resource.data)
-                         .affectedKeys()
-                         .hasOnly(['selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
-                    && request.resource.data.keys()
-                         .hasAll(['selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
-                    && existsAfter(/databases/$(database)/documents/mentorAssignments/$(request.resource.data.selectedMentorKey))
-                    && getAfter(/databases/$(database)/documents/mentorAssignments/$(request.resource.data.selectedMentorKey))
-                         .data.menteeUid == request.auth.uid;
+                    && (
+                      (
+                        !('selectedMatchId' in resource.data)
+                        && !('selectedMentorKey' in resource.data)
+                        && request.resource.data.diff(resource.data)
+                             .affectedKeys()
+                             .hasOnly(['selectedMatchId', 'selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
+                        && request.resource.data.keys()
+                             .hasAll(['selectedMatchId', 'selectedMentorKey', 'selectedMentorRank', 'selectedAt'])
+                        && hasFinalSelection(request.auth.uid, request.resource.data.selectedMentorKey, request.resource.data.selectedMatchId)
+                      )
+                      || (
+                        !('selectedMentorKey' in resource.data)
+                        && request.resource.data.diff(resource.data)
+                             .affectedKeys()
+                             .hasOnly(['feedbackActionCount'])
+                        && request.resource.data.feedbackActionCount is int
+                        && request.resource.data.feedbackActionCount >= 1
+                        && request.resource.data.feedbackActionCount <= 5
+                        && (
+                          !('feedbackActionCount' in resource.data)
+                          ? request.resource.data.feedbackActionCount == 1
+                          : resource.data.feedbackActionCount is int
+                            && request.resource.data.feedbackActionCount == resource.data.feedbackActionCount + 1
+                        )
+                      )
+                    ));
 
       allow create, delete: if false;
     }
 
-    // Mentee can read only his own matches
+    // Admins can read all matches; mentees can read only their own.
     match /matches/{matchId} {
-      allow read: if request.auth != null
-                  && resource.data.menteeId == request.auth.uid;
+      allow read: if isAdmin()
+                  || (request.auth != null
+                      && resource.data.menteeId == request.auth.uid);
 
-      // Later the app may update Like / Pass / Selected
-      allow update: if request.auth != null
+      // A pending/pass toggle must increment the per-mentee feedback count in
+      // the same transaction. Final selection is validated against the mentee
+      // profile update made in that transaction.
+      allow update: if (
+                      isAdmin()
+                      && request.resource.data.diff(resource.data)
+                           .affectedKeys()
+                           .hasOnly(['decision'])
+                      && (
+                        (
+                          (resource.data.decision == 'pending' || resource.data.decision == 'liked')
+                          && request.resource.data.decision == 'passed'
+                        )
+                        || (
+                          resource.data.decision == 'passed'
+                          && request.resource.data.decision == 'pending'
+                        )
+                        || (
+                          request.resource.data.decision == 'selected'
+                          && hasFinalSelection(resource.data.menteeId, resource.data.mentorKey, matchId)
+                        )
+                        || (
+                          resource.data.decision == 'selected'
+                          && request.resource.data.decision == 'pending'
+                          && hasClearedFinalSelection(resource.data.menteeId, resource.data.mentorKey, matchId)
+                        )
+                      )
+                    )
+                    || (request.auth != null
                     && resource.data.menteeId == request.auth.uid
                     && request.resource.data.diff(resource.data)
                          .affectedKeys()
-                         .hasOnly(['decision']);
+                         .hasOnly(['decision'])
+                    && (
+                      (
+                        (resource.data.decision == 'pending' || resource.data.decision == 'liked')
+                        && request.resource.data.decision == 'passed'
+                        && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid))
+                             .data.feedbackActionCount is int
+                        && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid))
+                             .data.feedbackActionCount <= 5
+                        && (
+                          !('feedbackActionCount' in get(/databases/$(database)/documents/mentees/$(request.auth.uid)).data)
+                          ? getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.feedbackActionCount == 1
+                          : get(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.feedbackActionCount is int
+                            && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.feedbackActionCount
+                               == get(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.feedbackActionCount + 1
+                        )
+                      )
+                      || (
+                        resource.data.decision == 'passed'
+                        && request.resource.data.decision == 'pending'
+                        && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid))
+                             .data.feedbackActionCount is int
+                        && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid))
+                             .data.feedbackActionCount <= 5
+                        && (
+                          !('feedbackActionCount' in get(/databases/$(database)/documents/mentees/$(request.auth.uid)).data)
+                          ? getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.feedbackActionCount == 1
+                          : get(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.feedbackActionCount is int
+                            && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.feedbackActionCount
+                               == get(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.feedbackActionCount + 1
+                        )
+                      )
+                      || (
+                        request.resource.data.decision == 'selected'
+                        && hasFinalSelection(request.auth.uid, resource.data.mentorKey, matchId)
+                      )
+                    ));
 
       allow create, delete: if false;
     }
@@ -73,11 +224,33 @@ service cloud.firestore {
       allow create: if request.auth != null
                     && request.resource.data.keys()
                          .hasOnly(['menteeUid', 'assignedAt'])
-                    && request.resource.data.menteeUid == request.auth.uid
-                    && existsAfter(/databases/$(database)/documents/mentees/$(request.auth.uid))
-                    && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid))
-                         .data.selectedMentorKey == mentorKey;
-      allow update, delete: if false;
+                    && (
+                      (request.resource.data.menteeUid == request.auth.uid
+                       && getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.selectedMatchId is string
+                       && hasFinalSelection(
+                            request.auth.uid,
+                            mentorKey,
+                            getAfter(/databases/$(database)/documents/mentees/$(request.auth.uid)).data.selectedMatchId
+                          ))
+                      || (isAdmin()
+                          && request.resource.data.menteeUid is string
+                          && getAfter(/databases/$(database)/documents/mentees/$(request.resource.data.menteeUid)).data.selectedMatchId is string
+                          && hasFinalSelection(
+                               request.resource.data.menteeUid,
+                               mentorKey,
+                               getAfter(/databases/$(database)/documents/mentees/$(request.resource.data.menteeUid)).data.selectedMatchId
+                             ))
+                    );
+      allow delete: if isAdmin()
+                    && resource.data.menteeUid is string
+                    && get(/databases/$(database)/documents/mentees/$(resource.data.menteeUid)).data.selectedMatchId is string
+                    && get(/databases/$(database)/documents/mentees/$(resource.data.menteeUid)).data.selectedMentorKey == mentorKey
+                    && hasClearedFinalSelection(
+                         resource.data.menteeUid,
+                         mentorKey,
+                         get(/databases/$(database)/documents/mentees/$(resource.data.menteeUid)).data.selectedMatchId
+                       );
+      allow update: if false;
     }
 
     // Admin-only mentor details. The Admin SDK bypasses these rules.

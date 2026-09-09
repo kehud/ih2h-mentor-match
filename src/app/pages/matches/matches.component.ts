@@ -17,6 +17,7 @@ import type { LegacyLocalizedField } from '../../models/match.model';
 import { Mentee } from '../../models/mentee.model';
 import {
   MatchesService,
+  FeedbackActionLimitError,
   MenteeAlreadySelectedError,
   MentorUnavailableError
 } from '../../services/matches.service';
@@ -61,8 +62,9 @@ export class MatchesComponent {
   isLoggingOut = false;
   isFinalSelectionInProgress = false;
   pendingMentorSelection: Match | null = null;
+  feedbackMatchId: string | null = null;
   private finalSelectionMentorKey: string | null = null;
-  selectionMessage: 'selectionSaved' | 'unavailable' | 'alreadySelected' | 'error' | null = null;
+  selectionMessage: 'selectionSaved' | 'unavailable' | 'alreadySelected' | 'feedbackActionLimit' | 'error' | null = null;
   private touchStart: { x: number; y: number } | null = null;
   private suppressDecisionClick = false;
   private loadingStartedAt = Date.now();
@@ -212,6 +214,7 @@ export class MatchesComponent {
   isSelectionError(): boolean {
     return this.selectionMessage === 'unavailable'
       || this.selectionMessage === 'alreadySelected'
+      || this.selectionMessage === 'feedbackActionLimit'
       || this.selectionMessage === 'error';
   }
 
@@ -230,6 +233,45 @@ export class MatchesComponent {
 
   private getProfileKey(match: Match): string {
     return this.getMatchKey(match);
+  }
+
+  isNotInterested(match: Match): boolean {
+    return match.decision === 'passed';
+  }
+
+  isFeedbackActionInProgress(match: Match): boolean {
+    return this.feedbackMatchId === match.id;
+  }
+
+  async toggleNotInterested(event: MouseEvent, match: Match, mentee: Mentee | null): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (
+      this.suppressDecisionClick
+      || !match.id
+      || this.isFeedbackActionInProgress(match)
+      || this.isFinalSelectionInProgress
+      || this.pendingMentorSelection
+      || this.isFinalSelectionLocked(mentee)
+    ) {
+      return;
+    }
+
+    this.feedbackMatchId = match.id;
+    this.selectionMessage = null;
+
+    try {
+      await this.matchesService.toggleNotInterested(match);
+    } catch (error) {
+      this.selectionMessage = error instanceof FeedbackActionLimitError
+        ? 'feedbackActionLimit'
+        : error instanceof MenteeAlreadySelectedError
+          ? 'alreadySelected'
+          : 'error';
+    } finally {
+      this.feedbackMatchId = null;
+    }
   }
 
   onMatchTouchStart(event: TouchEvent): void {
@@ -381,7 +423,7 @@ export class MatchesComponent {
     try {
       await new Promise<void>(resolve => setTimeout(resolve, 2000));
       await this.authService.logout();
-      await this.router.navigateByUrl('/');
+      await this.router.navigateByUrl('/login', { replaceUrl: true });
     } finally {
       this.isLoggingOut = false;
     }

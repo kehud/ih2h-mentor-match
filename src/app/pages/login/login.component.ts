@@ -80,8 +80,13 @@ export class LoginComponent {
   private async getPostLoginRoute(uid: string): Promise<string> {
     try {
       const userSnapshot = await getDoc(doc(this.firestore, `users/${uid}`));
+      const role = userSnapshot.data()?.['role'];
 
-      return userSnapshot.data()?.['role'] === 'admin' ? '/admin' : '/matches';
+      if (role === 'admin' || role === 'mentee') {
+        this.authService.rememberRole(uid, role);
+      }
+
+      return role === 'admin' ? '/admin' : '/matches';
     } catch {
       return '/matches';
     }

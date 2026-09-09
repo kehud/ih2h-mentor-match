@@ -97,7 +97,8 @@
 
           <div class="actions">
             @if (!isFinalSelectionLocked(viewState.mentee)) {
-              <button class="select" type="button" [disabled]="isFinalSelectionInProgress" (click)="chooseMentor($event, match, viewState.mentee)"><span aria-hidden="true">♧</span>{{ isFinalSelectionInProgress ? languageService.t('selecting') : languageService.t('likeToConnect') }}</button>
+              <button class="select" type="button" [disabled]="isFinalSelectionInProgress || pendingMentorSelection" (click)="chooseMentor($event, match, viewState.mentee)"><span aria-hidden="true">♧</span>{{ isFinalSelectionInProgress ? languageService.t('selecting') : languageService.t('likeToConnect') }}</button>
+              <button class="pass" type="button" [class.is-selected]="isNotInterested(match)" [disabled]="isFeedbackActionInProgress(match) || isFinalSelectionInProgress || pendingMentorSelection" (click)="toggleNotInterested($event, match, viewState.mentee)">{{ languageService.t('notInterested') }}</button>
             }
           </div>
           @if (isSelectedMentor(match, viewState.mentee)) {

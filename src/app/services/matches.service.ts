@@ -38,6 +38,13 @@ export class MenteeAlreadySelectedError extends Error {
   }
 }
 
+export class FeedbackActionLimitError extends Error {
+  constructor() {
+    super('The feedback action limit has been reached.');
+    this.name = 'FeedbackActionLimitError';
+  }
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -49,13 +56,13 @@ export class MatchesService {
       const db = getFirestore();
 
       let unsubscribeMatches: (() => void) | null = null;
-      let unsubscribeAssignments: Array<() => void> = [];
+      const unsubscribeAssignments = new Map<string, () => void>();
 
       const unsubscribeAuth = onAuthStateChanged(auth, user => {
         unsubscribeMatches?.();
         unsubscribeMatches = null;
         unsubscribeAssignments.forEach(unsubscribe => unsubscribe());
-        unsubscribeAssignments = [];
+        unsubscribeAssignments.clear();
 
         if (!user) {
           subscriber.next([]);
@@ -80,6 +87,43 @@ export class MatchesService {
           );
         };
 
+        const reconcileAssignmentListeners = () => {
+          const mentorKeys = new Set(currentMatches.map(match => match.mentorKey));
+
+          unsubscribeAssignments.forEach((unsubscribe, mentorKey) => {
+            if (!mentorKeys.has(mentorKey)) {
+              unsubscribe();
+              unsubscribeAssignments.delete(mentorKey);
+              mentorAssignments.delete(mentorKey);
+            }
+          });
+
+          mentorKeys.forEach(mentorKey => {
+            if (unsubscribeAssignments.has(mentorKey)) {
+              return;
+            }
+
+            const unsubscribe = onSnapshot(
+              doc(db, 'mentorAssignments', mentorKey),
+              assignmentSnapshot => {
+                mentorAssignments.set(
+                  mentorKey,
+                  assignmentSnapshot.exists() ? assignmentSnapshot.data() as MentorAssignment : null
+                );
+                publishAvailableMatches();
+              },
+              () => {
+                // A mentor assigned to somebody else is intentionally not readable
+                // by mentees. Treat that denied lookup as unavailable in the UI.
+                mentorAssignments.set(mentorKey, unavailableAssignment);
+                publishAvailableMatches();
+              }
+            );
+
+            unsubscribeAssignments.set(mentorKey, unsubscribe);
+          });
+        };
+
         unsubscribeMatches = onSnapshot(
           matchesQuery,
           snapshot => {
@@ -90,26 +134,7 @@ export class MatchesService {
               } as Match))
               .sort((a, b) => a.rank - b.rank);
 
-            unsubscribeAssignments.forEach(unsubscribe => unsubscribe());
-            unsubscribeAssignments = [...new Set(currentMatches.map(match => match.mentorKey))].map(mentorKey =>
-              onSnapshot(
-                doc(db, 'mentorAssignments', mentorKey),
-                assignmentSnapshot => {
-                  mentorAssignments.set(
-                    mentorKey,
-                    assignmentSnapshot.exists() ? assignmentSnapshot.data() as MentorAssignment : null
-                  );
-                  publishAvailableMatches();
-                },
-                () => {
-                  // A mentor assigned to somebody else is intentionally not readable
-                  // by mentees. Treat that denied lookup as unavailable in the UI.
-                  mentorAssignments.set(mentorKey, unavailableAssignment);
-                  publishAvailableMatches();
-                }
-              )
-            );
-
+            reconcileAssignmentListeners();
             publishAvailableMatches();
           },
           error => subscriber.error(error)
@@ -119,6 +144,7 @@ export class MatchesService {
       return () => {
         unsubscribeMatches?.();
         unsubscribeAssignments.forEach(unsubscribe => unsubscribe());
+        unsubscribeAssignments.clear();
         unsubscribeAuth();
       };
     });
@@ -129,6 +155,7 @@ export class MatchesService {
       throw new Error('Match ID is required.');
     }
 
+    const matchId = match.id;
     const auth = getAuth();
     const user = auth.currentUser;
 
@@ -138,7 +165,7 @@ export class MatchesService {
 
     const db = getFirestore();
     const mentorKey = match.mentorKey;
-    const matchRef = doc(db, 'matches', match.id);
+    const matchRef = doc(db, 'matches', matchId);
     const assignmentRef = doc(db, 'mentorAssignments', mentorKey);
     const menteeRef = doc(db, 'mentees', user.uid);
 
@@ -156,10 +183,73 @@ export class MatchesService {
         menteeSnapshot.data() as { selectedMentorKey?: string } | undefined,
         user.uid,
         mentorKey,
+        matchId,
         matchRef,
         assignmentRef,
         menteeRef
       );
+    });
+  }
+
+  async toggleNotInterested(match: Match): Promise<void> {
+    if (!match.id) {
+      throw new Error('Match ID is required.');
+    }
+
+    const auth = getAuth();
+    const user = auth.currentUser;
+
+    if (!user) {
+      throw new Error('User is not authenticated.');
+    }
+
+    const db = getFirestore();
+    const matchRef = doc(db, 'matches', match.id);
+    const menteeRef = doc(db, 'mentees', user.uid);
+
+    await runTransaction(db, async transaction => {
+      const [matchSnapshot, menteeSnapshot] = await Promise.all([
+        transaction.get(matchRef),
+        transaction.get(menteeRef)
+      ]);
+      const storedMatch = matchSnapshot.data() as Partial<Match> | undefined;
+      const mentee = menteeSnapshot.data() as {
+        feedbackActionCount?: unknown;
+        selectedMentorKey?: string;
+      } | undefined;
+
+      if (!storedMatch || storedMatch.menteeId !== user.uid || !matchSnapshot.exists()) {
+        throw new Error('Match does not belong to the authenticated mentee.');
+      }
+
+      if (mentee?.selectedMentorKey) {
+        throw new MenteeAlreadySelectedError();
+      }
+
+      const feedbackActionCount = typeof mentee?.feedbackActionCount === 'number'
+        && Number.isInteger(mentee.feedbackActionCount)
+        && mentee.feedbackActionCount >= 0
+        ? mentee.feedbackActionCount
+        : 0;
+
+      if (feedbackActionCount >= 5) {
+        throw new FeedbackActionLimitError();
+      }
+
+      if (
+        storedMatch.decision !== 'pending'
+        && storedMatch.decision !== 'passed'
+        && storedMatch.decision !== 'liked'
+      ) {
+        throw new Error('This match decision cannot be changed.');
+      }
+
+      transaction.update(matchRef, {
+        decision: storedMatch.decision === 'passed' ? 'pending' : 'passed'
+      });
+      transaction.set(menteeRef, {
+        feedbackActionCount: feedbackActionCount + 1
+      }, { merge: true });
     });
   }
 
@@ -170,6 +260,7 @@ export class MatchesService {
     mentee: { selectedMentorKey?: string } | undefined,
     menteeUid: string,
     mentorKey: string,
+    matchId: string,
     matchRef: ReturnType<typeof doc>,
     assignmentRef: ReturnType<typeof doc>,
     menteeRef: ReturnType<typeof doc>
@@ -198,6 +289,7 @@ export class MatchesService {
     });
 
     transaction.set(menteeRef, {
+      selectedMatchId: matchId,
       selectedMentorKey: mentorKey,
       selectedMentorRank: match.rank,
       selectedAt: selectionTimestamp

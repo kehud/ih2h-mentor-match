@@ -114,17 +114,17 @@
         </div>
 
         @if (filteredRows.length) {
-          <div class="table-scroll">
-            <table>
+          <div class="table-scroll" style="overflow-x: hidden">
+            <table class="mentees-table" style="min-width: 0; overflow-wrap: anywhere">
               <thead>
                 <tr>
                   <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('name')">Mentee <span>{{ sortIndicator('name') }}</span></button></th>
                   <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('status')">Status <span>{{ sortIndicator('status') }}</span></button></th>
                   <th scope="col">Selected mentor</th>
                   <th scope="col">Mentor email</th>
-                  <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('selectedRank')">Selected rank <span>{{ sortIndicator('selectedRank') }}</span></button></th>
                   <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('selectedAt')">Selected at <span>{{ sortIndicator('selectedAt') }}</span></button></th>
                   <th scope="col"><button class="sort-button" type="button" (click)="toggleMenteeSort('lastLoginAt')">Last login <span>{{ sortIndicator('lastLoginAt') }}</span></button></th>
+                  <th scope="col">Top 5</th>
                 </tr>
               </thead>
               <tbody>
@@ -146,10 +146,78 @@
                         —
                       }
                     </td>
-                    <td>{{ row.selectionStatus === 'selected' ? (row.selectedMentorRank ?? '—') : '—' }}</td>
                     <td>{{ formatSelectedAt(row.selectedAt) }}</td>
                     <td>{{ formatLastLogin(row.lastLoginAt) }}</td>
+                    <td>
+                      <button class="refresh-button" type="button" [attr.aria-expanded]="expandedTop5MenteeId === row.id" (click)="toggleTop5(row.id)">
+                        {{ expandedTop5MenteeId === row.id ? 'Hide Top 5' : 'View Top 5' }}
+                      </button>
+                    </td>
                   </tr>
+                  @if (expandedTop5MenteeId === row.id) {
+                    <tr class="top-five-detail-row" [class.is-opening]="openingTop5MenteeId === row.id" [class.is-closing]="closingTop5MenteeId === row.id">
+                      <td colspan="7">
+                        <section class="recent-card top-five-panel" [attr.aria-label]="'Top 5 matches for ' + getMenteeName(row)">
+                          <div class="top-five-content">
+                            <div class="section-heading top-five-heading">
+                              <strong>Top 5 matches</strong>
+                              <span>Loaded on demand</span>
+                            </div>
+                            @if (isTop5Loading(row.id)) {
+                              <p class="top-five-state">Loading Top 5 matches…</p>
+                            } @else if (getTop5Matches(row.id); as topMatches) {
+                              @if (topMatches.length) {
+                                <div class="top-five-scroll" style="overflow-x: auto">
+                                  <table class="top-five-table" style="min-width: 720px">
+                                    <thead>
+                                      <tr>
+                                        <th scope="col">Rank</th>
+                                        <th scope="col">Mentor</th>
+                                        <th scope="col">Mentor email</th>
+                                        <th scope="col">Match score</th>
+                                        <th scope="col">Status</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      @for (match of topMatches; track match.id) {
+                                        <tr>
+                                          <td>{{ match.rank }}</td>
+                                          <td>
+                                            {{ match.mentorFullName ?? 'Mentor unavailable' }}
+                                            <button class="match-reason-button" type="button" (click)="openMatchReason(match)">{{ languageService.t('viewMatchReason') }}</button>
+                                          </td>
+                                          <td>{{ match.mentorEmail ?? '—' }}</td>
+                                          <td>{{ match.matchScore }}%</td>
+                                          <td>
+                                            @if (match.isUnavailable) {
+                                              <span class="status assigned">Unavailable</span>
+                                            } @else {
+                                              <select class="refresh-button" [value]="getTopMatchStatus(match)" [disabled]="isTopMatchStatusUpdating(match)" [attr.aria-label]="'Status for ' + (match.mentorFullName ?? 'mentor')" (change)="updateTopMatchStatus(row.id, match, $event)">
+                                                <option value="available">Available</option>
+                                                <option value="notInterested" [disabled]="getTopMatchStatus(match) === 'selected'">Not interested</option>
+                                                <option value="selected">Selected</option>
+                                              </select>
+                                            }
+                                          </td>
+                                        </tr>
+                                      }
+                                    </tbody>
+                                  </table>
+                                </div>
+                              } @else {
+                                <p class="top-five-state">No matches are available for this mentee.</p>
+                              }
+                            } @else if (hasTop5LoadError(row.id)) {
+                              <p class="top-five-state" role="alert">Unable to load this mentee’s Top 5. Close and reopen to try again.</p>
+                            }
+                            @if (top5StatusError) {
+                              <p class="top-five-state" role="alert">{{ top5StatusError }}</p>
+                            }
+                          </div>
+                        </section>
+                      </td>
+                    </tr>
+                  }
                 }
               </tbody>
             </table>
@@ -231,3 +299,32 @@
     </section>
   }
 </main>
+
+@if (selectedTop5Match; as match) {
+  @if (getTopMatchDetails(match.id); as details) {
+    <div class="match-reason-overlay" role="dialog" aria-modal="true" [attr.aria-label]="languageService.t('viewMatchReason')" [attr.dir]="languageService.language() === 'he' ? 'rtl' : 'ltr'" (click)="closeMatchReason()">
+      <section class="match-reason-modal" (click)="$event.stopPropagation()">
+        <div class="match-reason-header">
+          <button type="button" (click)="closeMatchReason()" [attr.aria-label]="languageService.t('close')">×</button>
+        </div>
+        <p class="match-reason-score"><strong>{{ match.matchScore }}%</strong> {{ languageService.t('match') }}</p>
+        <section class="match-reason-section">
+          <h3>{{ languageService.t('whyGoodFit') }}</h3>
+          <ul>
+            @for (reason of getLocalizedArray(details.reasons); track reason) {
+              <li><span aria-hidden="true">✓</span>{{ reason }}</li>
+            }
+          </ul>
+        </section>
+        <section class="match-reason-section">
+          <h3>{{ languageService.t('areasOfConnection') }}</h3>
+          <div class="match-reason-areas">
+            @for (area of getLocalizedArray(details.matchedAreas); track $index) {
+              <span>{{ area }}</span>
+            }
+          </div>
+        </section>
+      </section>
+    </div>
+  }
+}

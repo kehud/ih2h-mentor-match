@@ -43,10 +43,10 @@ button { font: inherit; }
 .match-details li span { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #277953; background: #eaf4ee; font-size: 14px; font-weight: 800; }
 .area-pills { display: flex; flex-wrap: wrap; gap: 11px 14px; padding-top: 6px; }
 .area-pills span { padding: 10px 19px; border-radius: 22px; color: #165b40; background: linear-gradient(105deg, #edf5f0, #e0ece5); font-size: 13px; font-weight: 600; }
-.actions { display: grid; grid-template-columns: 1fr; gap: 30px; padding-top: 14px; }
-.actions button { display: flex; align-items: center; justify-content: center; gap: 14px; height: 63px; border: 1px solid #c9d2df; border-radius: 11px; color: #084ba8; background: #fff; font-size: 14px; font-weight: 700; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
+.actions { display: grid; grid-template-columns: 1fr; gap: 12px; padding-top: 14px; }
+.actions button { display: flex; align-items: center; justify-content: center; gap: 14px; height: 63px; border: 1px solid #e7b7be; border-radius: 11px; color: #93404f; background: #fff3f4; font-size: 14px; font-weight: 700; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
 .actions button:not(:disabled):hover, .nav-arrow:hover { transform: translateY(-1px); box-shadow: 0 4px 9px rgba(22, 48, 78, .12); }
-.actions .select { border-color: #1d7b50; color: white; background: linear-gradient(105deg, #197a50, #23794f); }
+.actions .select { border-color: #4a9b72; color: white; background: linear-gradient(105deg, #3f966b, #58a77d); }
 .actions .select span { font-size: 25px; }
 .actions button:disabled { cursor: default; opacity: .55; }
 .choice-note { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 14px 0 0; color: #52627d; font-size: 13px; }

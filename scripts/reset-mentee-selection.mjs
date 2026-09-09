@@ -32,7 +32,6 @@ const auth = getAuth();
 const db = getFirestore();
 const authUser = await auth.getUserByEmail(menteeEmail);
 const menteeRef = db.collection('mentees').doc(authUser.uid);
-const matchesQuery = db.collection('matches').where('menteeId', '==', authUser.uid);
 
 await db.runTransaction(async transaction => {
   const menteeSnapshot = await transaction.get(menteeRef);
@@ -42,35 +41,44 @@ await db.runTransaction(async transaction => {
   }
 
   const selectedMentorKey = menteeSnapshot.get('selectedMentorKey');
+  const selectedMatchId = menteeSnapshot.get('selectedMatchId');
 
   if (typeof selectedMentorKey !== 'string' || !selectedMentorKey) {
     throw new Error(`No final mentor selection found for ${menteeEmail}.`);
   }
 
+  if (typeof selectedMatchId !== 'string' || !selectedMatchId) {
+    throw new Error(`Selected match ID is missing for ${menteeEmail}.`);
+  }
+
   const assignmentRef = db.collection('mentorAssignments').doc(selectedMentorKey);
-  const [matchesSnapshot] = await Promise.all([
-    transaction.get(matchesQuery),
+  const selectedMatchRef = db.collection('matches').doc(selectedMatchId);
+  const [selectedMatchSnapshot, assignmentSnapshot] = await Promise.all([
+    transaction.get(selectedMatchRef),
     transaction.get(assignmentRef)
   ]);
-  const selectedMatches = matchesSnapshot.docs.filter(match => {
-    const data = match.data();
 
-    return data.mentorKey === selectedMentorKey && data.decision === 'selected';
-  });
+  if (
+    !selectedMatchSnapshot.exists
+    || selectedMatchSnapshot.get('menteeId') !== authUser.uid
+    || selectedMatchSnapshot.get('mentorKey') !== selectedMentorKey
+    || selectedMatchSnapshot.get('decision') !== 'selected'
+  ) {
+    throw new Error(`Selected match is invalid for ${menteeEmail}.`);
+  }
 
-  if (selectedMatches.length !== 1) {
-    throw new Error(
-      `Expected exactly one selected match for ${menteeEmail}; found ${selectedMatches.length}.`
-    );
+  if (!assignmentSnapshot.exists || assignmentSnapshot.get('menteeUid') !== authUser.uid) {
+    throw new Error(`Mentor assignment is invalid for ${menteeEmail}.`);
   }
 
   transaction.delete(assignmentRef);
   transaction.update(menteeRef, {
+    selectedMatchId: FieldValue.delete(),
     selectedMentorKey: FieldValue.delete(),
     selectedMentorRank: FieldValue.delete(),
     selectedAt: FieldValue.delete()
   });
-  transaction.update(selectedMatches[0].ref, { decision: 'pending' });
+  transaction.update(selectedMatchRef, { decision: 'pending' });
 });
 
 console.log(`Reset final mentor selection for ${menteeEmail}.`);

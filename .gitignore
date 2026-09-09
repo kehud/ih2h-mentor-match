@@ -45,4 +45,6 @@ Thumbs.db
 # Firebase Admin credentials
 private/
 .env
+.env.*
+.firebase/
 firebase-debug.log
